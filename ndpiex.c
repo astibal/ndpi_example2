@@ -1,5 +1,6 @@
 /*
  * ndpiex.c
+ * Copyright (C) 2021 by Ales Stibal
  * Copyright (C) 2012 by Gianluca Costa
  * Copyright (C) 2009-2010 by ipoque GmbH
  * 
