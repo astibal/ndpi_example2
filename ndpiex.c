@@ -27,56 +27,25 @@
 #include <stdarg.h>
 #include <netinet/in.h>
 
-#include <linux/ip.h>
-#include <linux/tcp.h>
-#include <linux/udp.h>
+// #include <linux/ip.h>
+// #include <linux/tcp.h>
+// #include <linux/udp.h>
 #include <linux/if_ether.h>
 
 #include <pcap.h>
 
-#include "ndpi_api.h"
+#include "ndpi/ndpi_main.h"
 
 #define	MAX_OSDPI_IDS                   100000
 #define	MAX_OSDPI_FLOWS                 100000
 
-#ifndef NDPI_PROTOCOL_LONG_STRING
-#define NDPI_PROTOCOL_LONG_STRING "Unknown","FTP","POP","SMTP","IMAP","DNS","IPP","HTTP","MDNS","NTP","NETBIOS",\
-	"NFS","SSDP","BGP","SNMP","XDMCP","SMB","SYSLOG","DHCP","PostgreSQL","MySQL",\
-"TDS","DirectDownloadLink","I23V5","AppleJuice","DirectConnect","Socrates","WinMX","MANOLITO","PANDO","Filetopia",\
-"iMESH","Kontiki","OpenFT","Kazaa","Gnutella","eDonkey","Bittorrent","OFF","AVI","Flash",\
-"OGG","MPEG","QuickTime","RealMedia","Windowsmedia","MMS","XBOX","QQ","MOVE","RTSP",\
-"Feidian","Icecast","PPLive","PPStream","Zattoo","SHOUTCast","SopCast","TVAnts","TVUplayer","VeohTV",\
-"QQLive","Thunder","Soulseek","GaduGadu","IRC","Popo","Jabber","MSN","Oscar","Yahoo",\
-"Battlefield","Quake","Second_Life","Steam","Halflife2","World_of_Warcraft","Telnet","STUN","IPSEC","GRE",\
-"ICMP","IGMP","EGP","SCTP","OSPF","IP_in_IP","RTP","RDP","VNC","PCAnywhere",\
-"SSL","SSH","USENET","MGCP","IAX","TFTP","AFP","StealthNet","Aimini","SIP",\
-"Truphone","ICMPv6","DHCPv6","Armagetron","CrossFire","Dofus","Fiesta","Florensia","Guildwars","HTTP_Application_Activesync",\
-"Kerberos","LDAP","MapleStory","msSQL","PPTP","WARCRAFT3","World_of_Kung_Fu","MEEBO","FaceBook","Twitter",\
-"DropBox","Gmail","Google_Maps","YouTube","Skype","Google","DCE_RPC","NetFlow_IPFIX","sFlow","HTTP_Connect_SSL_over_HTTP",\
-"HTTP_Proxy","Citrix","Netflix","LastFM","Grooveshark","SkyFile_Prepaid","SkyFile_Rudics","SkyFile_Postpaid","CitrixOnline","Apple_iMessage_FaceTime",\
-"Webex","WhatsApp","Apple_iCloud","Viber","Apple_iTunes","Radius","Windows_Update","TeamViewer","Tuenti","Lotus_Notes",\
-"SAP","GTP","uPnP","LLMNR","Remote_Scan"
-#endif
-
-#ifndef NDPI_PROTOCOL_SHORT_STRING
-#define NDPI_PROTOCOL_SHORT_STRING "ukn","ftp","pop","smtp","imap","dns","ipp","http","mdns","ntp","netbios",\
-	"nfs","ssdp","bgp","snmp","xdmcp","smb","syslog","dhcp","postgres","mysql",\
-"tds","ddl","i23v5","applejuice","directconnect","socrates","winmx","manolito","pando","filetopia",\
-"iMESH","kontiki","openft","fasttrack","gnutella","edonkey","bittorrent","off","avi","flash",\
-"ogg","mpeg","quicktime","realmedia","windowsmedia","mms","xbox","qq","move","rtsp",\
-"feidian","icecast","pplive","ppstream","zattoo","shoutcast","sopcast","tvants","tvuplayer","veohtv",\
-"qqlive","thunder","soulseek","gadugadu","irc","popo","jabber","msn","oscar","yahoo",\
-"battlefield","quake","secondlife","steam","hl2","worldofwarcraft","telnet","stun","ipsec","gre",\
-"icmp","igmp","egp","sctp","ospf","ipip","rtp","rdp","vnc","pcanywhere",\
-"ssl","ssh","usenet","mgcp","iax","tftp","afp","stealthnet","aimini","sip",\
-"truphone","icmpv6","dhcpv6","armagetron","crossfire","dofus","fiesta","florensia","guildwars","httpactivesync",\
-"kerberos","ldap","maplestory","mssql","pptp","warcraft3","wokf","meebo","facebook","twitter",\
-"dropbox","gmail","gmaps","youtube","skype","google","dcerpc","netflow","sflow","httpconnect",\
-"httpproxy","citrix","netflix","lastfm","grooveshark","skyfileprepaid","skyfilerudics","skyfilepostpaid","citrixonline","apple",\
-"webex","wgatsapp","appleicloud","viber","appleitunes","radius","windowsupdate","teamviewer","tuenti","lotusnotes",\
-"sap","gtp","upnp","llmnr","remotescan"
-#endif
-
+struct linux_cooked_capture {
+    uint16_t type;
+    uint16_t arphrd;
+    uint16_t ll_addr_size;
+    uint8_t  ll_hdr_data[8];
+    uint16_t proto_type;
+};
 
 // cli options
 static char *_pcap_file = NULL;
@@ -89,7 +58,6 @@ static int _pcap_datalink_type = 0;
 // detection
 static struct ndpi_detection_module_struct *ndpi_struct = NULL;
 static u_int32_t detection_tick_resolution = 1000;
-static char *prot_long_str[] = { NDPI_PROTOCOL_LONG_STRING };
 
 #ifdef NDPI_ENABLE_DEBUG_MESSAGES
 static char *prot_short_str[] = { NDPI_PROTOCOL_SHORT_STRING };
@@ -126,7 +94,7 @@ typedef struct osdpi_flow {
     struct ndpi_flow_struct *ndpi_flow;
     
     // result only, not used for flow identification
-    u_int32_t detected_protocol;
+    ndpi_protocol detected_protocol;
 } osdpi_flow_t;
 
 static u_int32_t size_flow_struct = 0;
@@ -352,13 +320,13 @@ static struct osdpi_flow *get_osdpi_flow(const struct iphdr *iph, u_int16_t ipsi
     }
 }
 
-static void setupDetection(void)
-{
+static void setupDetection(void) {
     u_int32_t i;
     NDPI_PROTOCOL_BITMASK all;
 
     // init global detection structure
-    ndpi_struct = ndpi_init_detection_module(detection_tick_resolution, malloc_wrapper, free_wrapper, debug_printf);
+    // ndpi_struct = ndpi_init_detection_module(detection_tick_resolution, malloc_wrapper, free_wrapper, debug_printf);
+    ndpi_struct = ndpi_init_detection_module();
     if (ndpi_struct == NULL) {
         printf("ERROR: global structure initialization failed\n");
         exit(-1);
@@ -402,13 +370,22 @@ static void setupDetection(void)
     // clear memory for results
     memset(protocol_counter, 0, (NDPI_MAX_SUPPORTED_PROTOCOLS + 1) * sizeof(u_int64_t));
     memset(protocol_counter_bytes, 0, (NDPI_MAX_SUPPORTED_PROTOCOLS + 1) * sizeof(u_int64_t));
+
+//    ndpi_port_range ports_a[MAX_DEFAULT_PORTS], ports_b[MAX_DEFAULT_PORTS];
+//    u_int16_t no_master[2] = {NDPI_PROTOCOL_NO_MASTER_PROTO, NDPI_PROTOCOL_NO_MASTER_PROTO}, custom_master[2];
+//    ndpi_set_proto_defaults(ndpi_struct, NDPI_PROTOCOL_ACCEPTABLE, NDPI_PROTOCOL_HTTP,
+//                            1 /* can_have_a_subprotocol */, no_master,
+//                            no_master, "HTTP", NDPI_PROTOCOL_CATEGORY_WEB,
+//                            ndpi_build_default_ports(ports_a, 0, 0 /* ntop */, 0, 0, 0) /* TCP */,
+//                            ndpi_build_default_ports(ports_b, 0, 0, 0, 0, 0) /* UDP */);
 }
 
 static void terminateDetection(void)
 {
     u_int32_t i;
 
-    ndpi_exit_detection_module(ndpi_struct, free_wrapper);
+    //ndpi_exit_detection_module(ndpi_struct, free_wrapper);
+    ndpi_exit_detection_module(ndpi_struct);
 
     for (i = 0; i < MAX_OSDPI_IDS; i++) {
         free(osdpi_ids[i].ndpi_id);
@@ -426,7 +403,7 @@ static unsigned int packet_processing(const uint64_t time, const struct iphdr *i
     struct ndpi_id_struct *dst = NULL;
     struct osdpi_flow *flow = NULL;
     struct ndpi_flow_struct *ipq_flow = NULL;
-    u_int32_t protocol = 0;
+    ndpi_protocol protocol;
 
 
     src = get_id((u_int8_t *) & iph->saddr);
@@ -442,7 +419,7 @@ static unsigned int packet_processing(const uint64_t time, const struct iphdr *i
 
 #ifndef NDPI_ENABLE_DEBUG_MESSAGES
     if (ip_packet_count % 499 == 0) {
-        printf("\rip packets scanned: \x1b[33m%-10llu\x1b[0m ip bytes scanned: \x1b[34m%-10llu\x1b[0m",
+        printf("\rip packets scanned: \x1b[33m%-10lu\x1b[0m ip bytes scanned: \x1b[34m%-10lu\x1b[0m",
                ip_packet_count, total_bytes);
     }
 #endif
@@ -464,8 +441,8 @@ static unsigned int packet_processing(const uint64_t time, const struct iphdr *i
         return 0;
     }
     
-    protocol_counter[protocol]++;
-    protocol_counter_bytes[protocol] += rawsize;
+    protocol_counter[protocol.master_protocol]++;
+    protocol_counter_bytes[protocol.master_protocol] += rawsize;
     
     if (flow != NULL) {
         flow->detected_protocol = protocol;
@@ -480,8 +457,8 @@ static void printResults(void)
 
     printf("\x1b[2K\n");
     printf("pcap file contains\n");
-    printf("\tip packets:   \x1b[33m%-13llu\x1b[0m of %llu packets total\n", ip_packet_count, raw_packet_count);
-    printf("\tip bytes:     \x1b[34m%-13llu\x1b[0m\n", total_bytes);
+    printf("\tip packets:   \x1b[33m%-13lu\x1b[0m of %lu packets total\n", ip_packet_count, raw_packet_count);
+    printf("\tip bytes:     \x1b[34m%-13lu\x1b[0m\n", total_bytes);
     printf("\tunique ids:   \x1b[35m%-13u\x1b[0m\n", osdpi_id_count);
     printf("\tunique flows: \x1b[36m%-13u\x1b[0m\n", osdpi_flow_count);
 
@@ -492,21 +469,88 @@ static void printResults(void)
 
         // count flows for that protocol
         for (j = 0; j < osdpi_flow_count; j++) {
-            if (osdpi_flows[j].detected_protocol == i) {
+            if (osdpi_flows[j].detected_protocol.app_protocol == i) {
                 protocol_flows++;
             }
         }
 
         if (protocol_counter[i] > 0) {
-            printf("\t\x1b[31m%-20s\x1b[0m packets: \x1b[33m%-13llu\x1b[0m bytes: \x1b[34m%-13llu\x1b[0m "
+            printf("\t\x1b[31m%-20s\x1b[0m packets: \x1b[33m%-13lu\x1b[0m bytes: \x1b[34m%-13lu\x1b[0m "
                    "flows: \x1b[36m%-13u\x1b[0m\n",
-                   prot_long_str[i], protocol_counter[i], protocol_counter_bytes[i], protocol_flows);
+                   ndpi_get_proto_name(ndpi_struct,i), protocol_counter[i], protocol_counter_bytes[i], protocol_flows);
         }
+
+
     }
     printf("\n\n");
 }
 
-static void openPcapFile(void)
+
+static void printResults_undetected()
+{
+
+    printf("Undetected flows: \n\n");
+
+    // count flows for that protocol
+    for (int j = 0; j < osdpi_flow_count; j++) {
+
+        char* src[32]; memset(src, 0, 32);
+        char* dst[32]; memset(dst, 0, 32);
+
+        if(osdpi_flows[j].detected_protocol.app_protocol != 0) {
+            continue;
+        }
+
+        char* a = inet_ntoa(*(struct in_addr*)&osdpi_flows[j].lower_ip);
+        strncpy((void*)src, a, strnlen(a, 31));
+
+        a = inet_ntoa(*(struct in_addr*)&osdpi_flows[j].upper_ip);
+        strncpy((void*)dst, a, strnlen(a, 31));
+
+
+        printf("\t\x1b[31m%s\x1b[0m - %s:%d->%s:%d\n",
+               ndpi_get_proto_name(ndpi_struct, osdpi_flows[j].detected_protocol.master_protocol),
+               (const char*)src, ntohs(osdpi_flows[j].lower_port),
+               (const char*)dst, ntohs(osdpi_flows[j].upper_port));
+    }
+
+    printf("\n\n");
+}
+
+static void printResults_detailed()
+{
+
+    printf("Identified flows: \n\n");
+
+    // count flows for that protocol
+    for (int j = 0; j < osdpi_flow_count; j++) {
+
+        char* src[32]; memset(src, 0, 32);
+        char* dst[32]; memset(dst, 0, 32);
+
+        if(osdpi_flows[j].detected_protocol.app_protocol == 0) {
+            continue;
+        }
+
+        char* a = inet_ntoa(*(struct in_addr*)&osdpi_flows[j].lower_ip);
+        strncpy((void*)src, a, strnlen(a, 31));
+
+        a = inet_ntoa(*(struct in_addr*)&osdpi_flows[j].upper_ip);
+        strncpy((void*)dst, a, strnlen(a, 31));
+
+
+        printf("\t\x1b[31m%s\x1b[0m - %s:%d->%s:%d\n",
+               //prot_long_str[osdpi_flows[j].detected_protocol.app_protocol],
+               ndpi_get_proto_name(ndpi_struct, osdpi_flows[j].detected_protocol.app_protocol),
+               (const char*)src, ntohs(osdpi_flows[j].lower_port),
+               (const char*)dst, ntohs(osdpi_flows[j].upper_port));
+    }
+
+    printf("\n\n");
+}
+
+
+static void openPcapFile()
 {
     _pcap_handle = pcap_open_offline(_pcap_file, _pcap_error_buffer);
 
@@ -517,7 +561,7 @@ static void openPcapFile(void)
     _pcap_datalink_type = pcap_datalink(_pcap_handle);
 }
 
-static void closePcapFile(void)
+static void closePcapFile()
 {
     if (_pcap_handle != NULL) {
         pcap_close(_pcap_handle);
@@ -527,11 +571,10 @@ static void closePcapFile(void)
 // executed for each packet in the pcap file
 static void pcap_packet_callback(u_char * args, const struct pcap_pkthdr *header, const u_char * packet)
 {
-    const struct ethhdr *ethernet = (struct ethhdr *) packet;
-    struct iphdr *iph = (struct iphdr *) &packet[sizeof(struct ethhdr)];
+
+
     u_int64_t time;
     static u_int64_t lasttime = 0;
-    u_int16_t type;
 
     raw_packet_count++;
 
@@ -545,23 +588,39 @@ static void pcap_packet_callback(u_char * args, const struct pcap_pkthdr *header
     lasttime = time;
 
 
-    type = ethernet->h_proto;
+    u_int16_t type = 0;
+    size_t hdr_sz = 0;
 
     // just work on Ethernet packets that contain IP
-    if (_pcap_datalink_type == DLT_EN10MB && type == htons(ETH_P_IP)
-        && header->caplen >= sizeof(struct ethhdr)) {
+    if (_pcap_datalink_type == DLT_EN10MB) {
+        const struct ethhdr *ethernet = (struct ethhdr *) packet;
+        type = ethernet->h_proto;
+        hdr_sz = sizeof(struct ethhdr);
+    }
+    else if(_pcap_datalink_type == DLT_LINUX_SLL) {
+        const struct linux_cooked_capture* llc = (struct linux_cooked_capture*) packet;
+        type = llc->proto_type;
+        hdr_sz = sizeof(struct linux_cooked_capture);
+    }
+    else {
+        printf("unknown link_type: %d\n", _pcap_datalink_type);
+    }
+
+    if(type == htons(ETH_P_IP) && header->caplen >= hdr_sz) {
+
+        struct iphdr *iph = (struct iphdr *) &packet[hdr_sz];
 
         if (header->caplen < header->len) {
-            static u_int8_t cap_warning_used = 0;
-            if (cap_warning_used == 0) {
-                printf
-                    ("\n\nWARNING: packet capture size is smaller than packet size, DETECTION MIGHT NOT WORK CORRECTLY OR EVEN CRASH\n\n");
-                sleep(2);
-                cap_warning_used = 1;
-            }
+                static u_int8_t cap_warning_used = 0;
+                if (cap_warning_used == 0) {
+                    printf
+                        ("\n\nWARNING: packet capture size is smaller than packet size, DETECTION MIGHT NOT WORK CORRECTLY OR EVEN CRASH\n\n");
+                    sleep(2);
+                    cap_warning_used = 1;
+                }
         }
 
-        if (iph->version != 4) {
+        if (iph->version != 4u) {
             static u_int8_t ipv4_warning_used = 0;
             if (ipv4_warning_used == 0) {
                 printf("\n\nWARNING: only IPv4 packets are supported, all other packets will be discarded\n\n");
@@ -571,12 +630,13 @@ static void pcap_packet_callback(u_char * args, const struct pcap_pkthdr *header
             return;
         }
         // process the packet
-        packet_processing(time, iph, header->len - sizeof(struct ethhdr), header->len);
+        packet_processing(time, iph, header->len - hdr_sz, header->len);
     }
+
 
 }
 
-static void runPcapLoop(void)
+static void runPcapLoop()
 {
     if (_pcap_handle != NULL) {
         pcap_loop(_pcap_handle, -1, &pcap_packet_callback, NULL);
@@ -594,6 +654,8 @@ int main(int argc, char **argv)
     closePcapFile();
 
     printResults();
+    printResults_undetected();
+    printResults_detailed();
 
     terminateDetection();
 
